@@ -1,0 +1,73 @@
+{
+  "rules": {
+    "config": {
+      ".read": false,
+      ".write": false
+    },
+
+    "staff": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+
+    "doctors": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && !data.exists()",
+        ".validate": "newData.hasChildren(['name', 'code']) && newData.child('code').val() === root.child('config').child('doctorCode').val()"
+      }
+    },
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && newData.exists()",
+        ".validate": "newData.hasChildren(['role', 'name']) && (!data.exists() || data.child('role').val() === newData.child('role').val()) && (newData.child('role').val() === 'patient' || (newData.child('role').val() === 'doctor' && (newData.parent().parent().child('doctors').child($uid).exists() || root.child('staff').child($uid).val() === true)))"
+      }
+    },
+
+    "patients": {
+      ".read": "auth != null && (root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true)",
+      "$pid": {
+        ".read": "auth != null && auth.uid === $pid",
+        ".write": "auth != null && newData.exists() && ((auth.uid === $pid && newData.parent().parent().child('users').child($pid).child('role').val() === 'patient') || ((root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true) && data.exists()))",
+        ".validate": "newData.hasChildren(['name'])"
+      }
+    },
+
+    "latest": {
+      ".read": "auth != null && (root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true)",
+      "$pid": {
+        ".read": "auth != null && auth.uid === $pid",
+        ".write": "auth != null && (auth.uid === $pid || root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true) && root.child('patients').child($pid).exists()",
+        ".validate": "newData.child('ts').isNumber()"
+      }
+    },
+
+    "vitals": {
+      ".read": "auth != null && (root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true)",
+      "$pid": {
+        ".read": "auth != null && auth.uid === $pid",
+        ".indexOn": ["ts"],
+        "$sampleId": {
+          ".write": "auth != null && !data.exists() && (auth.uid === $pid || root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true) && root.child('patients').child($pid).exists()",
+          ".validate": "newData.child('ts').isNumber()"
+        }
+      }
+    },
+
+    "alerts": {
+      ".read": "auth != null && (root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true)",
+      "$pid": {
+        ".read": "auth != null && auth.uid === $pid",
+        ".indexOn": ["at"],
+        "$alertId": {
+          ".write": "auth != null && newData.exists() && (auth.uid === $pid || root.child('doctors').child(auth.uid).exists() || root.child('staff').child(auth.uid).val() === true) && root.child('patients').child($pid).exists()",
+          ".validate": "newData.hasChildren(['rule', 'severity', 'message', 'at'])"
+        }
+      }
+    }
+  }
+}

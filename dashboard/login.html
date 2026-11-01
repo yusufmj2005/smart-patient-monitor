@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Patient Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2-5 4 10 2-5h6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-wrap">
+    <div class="auth-card" id="authCard">
+      <div class="brand auth-brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>
+        <div>
+          <h1>Smart Patient Monitor</h1>
+          <p class="brand-sub">IoT health &amp; engagement dashboard</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs" id="authTabs" role="tablist" hidden>
+        <button type="button" role="tab" data-mode="signin" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" data-mode="register" aria-selected="false">Create account</button>
+      </div>
+
+      <div id="authMsg" class="auth-msg" role="alert" hidden></div>
+
+      <!-- Sign in -->
+      <form id="signinForm" class="auth-form" hidden novalidate>
+        <label class="field">
+          <span>Email</span>
+          <input id="siEmail" type="email" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <span class="pw">
+            <input id="siPassword" type="password" autocomplete="current-password" required>
+            <button type="button" class="pw-toggle" data-for="siPassword" aria-label="Show password">Show</button>
+          </span>
+        </label>
+        <button id="btnSignIn" class="btn primary block" type="submit">Sign in</button>
+        <button id="btnReset" class="btn ghost block" type="button">Forgot password?</button>
+      </form>
+
+      <!-- Create account / finish setting up an account created in the console -->
+      <form id="registerForm" class="auth-form" hidden novalidate>
+        <div id="completeIntro" hidden>
+          <h2 class="auth-title">Finish setting up your account</h2>
+          <p class="auth-lead">Signed in as <b id="completeEmail"></b>. Choose your account type to continue.</p>
+        </div>
+
+        <fieldset class="role-pick">
+          <legend>I am a</legend>
+          <label class="role-card">
+            <input type="radio" name="role" value="doctor">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v6a4 4 0 0 0 8 0V3M10 13v3a5 5 0 0 0 10 0v-2"/><circle cx="20" cy="12" r="2"/></svg>
+            <b>Doctor</b>
+            <span>See all patients and their vitals</span>
+          </label>
+          <label class="role-card">
+            <input type="radio" name="role" value="patient">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 21v-1a7 7 0 0 1 16 0v1"/></svg>
+            <b>Patient</b>
+            <span>Record and view your own vitals</span>
+          </label>
+        </fieldset>
+
+        <label class="field">
+          <span>Full name</span>
+          <input id="rgName" type="text" autocomplete="name" required>
+        </label>
+
+        <div id="accountFields" class="auth-form">
+          <label class="field">
+            <span>Email</span>
+            <input id="rgEmail" type="email" autocomplete="email" required>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Password</span>
+              <input id="rgPassword" type="password" autocomplete="new-password" minlength="6" required>
+            </label>
+            <label class="field">
+              <span>Confirm password</span>
+              <input id="rgConfirm" type="password" autocomplete="new-password" minlength="6" required>
+            </label>
+          </div>
+        </div>
+
+        <div class="auth-form" data-role-fields="doctor" hidden>
+          <label class="field">
+            <span>Specialisation <em>(optional)</em></span>
+            <input id="rgSpecialty" type="text" placeholder="e.g. General physician">
+          </label>
+          <label class="field" id="codeField">
+            <span>Doctor registration code</span>
+            <input id="rgCode" type="password" autocomplete="off">
+            <small>Given to you by the clinic administrator.</small>
+          </label>
+        </div>
+
+        <div class="auth-form" data-role-fields="patient" hidden>
+          <div class="field-row">
+            <label class="field">
+              <span>Age</span>
+              <input id="rgAge" type="number" min="0" max="130" inputmode="numeric">
+            </label>
+            <label class="field">
+              <span>Gender</span>
+              <select id="rgGender">
+                <option value="">Select…</option>
+                <option>Female</option>
+                <option>Male</option>
+                <option>Other</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Phone <em>(optional)</em></span>
+            <input id="rgPhone" type="tel" autocomplete="tel">
+          </label>
+          <label class="field">
+            <span>Caregiver email <em>(optional)</em></span>
+            <input id="rgCaregiver" type="email" autocomplete="off">
+            <small>For alert notifications to a family member or caregiver.</small>
+          </label>
+        </div>
+
+        <button id="btnRegister" class="btn primary block" type="submit">Create account</button>
+        <button id="btnCompleteSignOut" class="btn ghost block" type="button" hidden>Sign out</button>
+      </form>
+
+      <!-- Shown until firebase-config.js is filled in -->
+      <div id="setupNote" class="auth-form" hidden>
+        <h2 class="auth-title">Cloud not set up yet</h2>
+        <p class="auth-lead">
+          Login and cloud sync turn on once you add your Firebase project settings to
+          <code>dashboard/js/firebase-config.js</code>. The README has the steps.
+        </p>
+        <a class="btn primary block" href="index.html">Open dashboard without cloud</a>
+      </div>
+
+      <p id="loadingNote" class="auth-lead">Loading…</p>
+    </div>
+    <p class="auth-foot">Student prototype. Not a medical device.</p>
+  </main>
+
+  <script src="js/firebase-config.js"></script>
+  <script>
+    if (!window.CLOUD_ENABLED) {
+      document.getElementById('setupNote').hidden = false;
+      document.getElementById('loadingNote').hidden = true;
+    } else {
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = 'js/login.js';
+      document.body.appendChild(s);
+      setTimeout(() => {
+        const note = document.getElementById('loadingNote');
+        if (!note.hidden) note.textContent = 'Could not load Firebase. Check your internet connection and reload.';
+      }, 10000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patients · Patient Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2-5 4 10 2-5h6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/firebase-config.js"></script>
+  <script>if (!window.CLOUD_ENABLED) location.replace('index.html');</script>
+</head>
+<body>
+  <div id="authGate" class="auth-gate">
+    <div class="auth-gate-box">
+      <p id="authGateMsg">Checking sign-in…</p>
+      <div id="authGateActions" class="row-btns" hidden>
+        <button class="btn primary" type="button" onclick="location.reload()">Retry</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>
+      <div>
+        <h1>Smart Patient Monitor</h1>
+        <p class="brand-sub">Doctor workspace</p>
+      </div>
+    </div>
+    <div class="account">
+      <span class="role-badge">Doctor</span>
+      <span id="acctName" class="acct-email"></span>
+      <button id="btnSignOut" class="btn ghost small" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" aria-label="Overview">
+      <div class="sum-tile"><span class="sum-label">Patients</span><span class="sum-value" id="sumTotal">0</span></div>
+      <div class="sum-tile"><span class="sum-label">Live now</span><span class="sum-value" id="sumLive">0</span></div>
+      <div class="sum-tile attn"><span class="sum-label">Need attention</span><span class="sum-value" id="sumAttn">0</span></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Patients</h2>
+        <input id="search" class="search" type="search" placeholder="Search by name or email" aria-label="Search patients">
+      </div>
+      <div class="table-wrap">
+        <table class="ptable">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th class="c-demo">Age / gender</th>
+              <th class="num">Heart rate</th>
+              <th class="num">SpO₂</th>
+              <th class="num c-temp">Temp</th>
+              <th class="num c-eng">Engagement</th>
+              <th class="c-seen">Last reading</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="emptyNote" hidden></p>
+    </section>
+  </main>
+
+  <script type="module" src="js/patients.js"></script>
+  <script>
+    setTimeout(() => {
+      // Only if nothing more specific has been shown yet.
+      if (!document.getElementById('authGate') || !document.getElementById('authGateActions').hidden) return;
+      document.getElementById('authGateMsg').textContent = 'Could not reach Firebase. Check your internet connection.';
+      document.getElementById('authGateActions').hidden = false;
+    }, 10000);
+  </script>
+</body>
+</html>

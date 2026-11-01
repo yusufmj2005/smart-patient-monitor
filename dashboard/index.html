@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patient Monitor</title>
+  <meta name="description" content="IoT smart patient health monitoring and engagement dashboard (ESP8266 over USB).">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2-5 4 10 2-5h6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/firebase-config.js"></script>
+</head>
+<body>
+  <!-- Covers the dashboard until Firebase confirms the user is signed in (only when cloud is configured). -->
+  <div id="authGate" class="auth-gate" hidden>
+    <div class="auth-gate-box">
+      <p id="authGateMsg">Checking sign-in…</p>
+      <div id="authGateActions" class="row-btns" hidden>
+        <button class="btn primary" type="button" onclick="location.reload()">Retry</button>
+        <button class="btn" type="button" id="btnOffline">Continue offline (no cloud)</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>
+      <div>
+        <h1>Smart Patient Monitor</h1>
+        <p class="brand-sub">IoT health &amp; engagement dashboard</p>
+      </div>
+    </div>
+
+    <!-- Offline mode: type the patient details. With cloud login this is replaced by #patientCtx. -->
+    <div class="patient" id="patientLocal">
+      <label>Patient <input id="patientName" type="text" placeholder="Name" autocomplete="off"></label>
+      <label>ID <input id="patientId" type="text" placeholder="P-001" autocomplete="off" class="short"></label>
+    </div>
+
+    <div class="patient-ctx" id="patientCtx" hidden>
+      <a id="backLink" class="btn small" href="patients.html" hidden>← All patients</a>
+      <div>
+        <div class="ctx-name" id="ctxName"></div>
+        <div class="ctx-meta" id="ctxMeta"></div>
+      </div>
+    </div>
+
+    <div class="conn">
+      <span id="connStatus" class="pill" data-state="off"><span class="dot"></span><span class="txt">Disconnected</span></span>
+      <select id="baud" aria-label="Baud rate" title="Baud rate (must match the firmware: 115200)" autocomplete="off">
+        <option>9600</option><option>57600</option><option selected>115200</option><option>230400</option>
+      </select>
+      <button id="btnConnect" class="btn primary" type="button">Connect USB</button>
+      <button id="btnDemo" class="btn" type="button">Demo mode</button>
+    </div>
+
+    <div id="account" class="account" hidden>
+      <span id="cloudStatus" class="pill" data-state="off"><span class="dot"></span><span class="txt">Cloud</span></span>
+      <span id="acctRole" class="role-badge"></span>
+      <span id="acctEmail" class="acct-email"></span>
+      <button id="btnSignOut" class="btn ghost small" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <div id="unsupported" class="banner" hidden>
+    USB connection needs the Web Serial API, available in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a desktop computer.
+    Open this page in one of those browsers. Demo mode still works here.
+  </div>
+
+  <div id="firefoxNote" class="banner" hidden>
+    You're using Firefox. Its USB serial support is new and may not receive data from the board.
+    For <strong>Connect USB</strong>, use <strong>Microsoft Edge</strong> or <strong>Google Chrome</strong>.
+    Viewing patients and Demo mode work fine here.
+  </div>
+
+  <main>
+    <section id="demoBar" class="demo-bar" hidden>
+      <span class="demo-label">Demo mode · simulate an event:</span>
+      <button class="chip" data-scenario="tachycardia" type="button">Tachycardia</button>
+      <button class="chip" data-scenario="hypoxia" type="button">Low SpO₂</button>
+      <button class="chip" data-scenario="fever" type="button">Fever</button>
+      <button class="chip" data-scenario="fall" type="button">Fall</button>
+      <button class="chip" data-scenario="remove" type="button">Remove sensor</button>
+      <button class="chip" data-scenario="normal" type="button">Back to normal</button>
+    </section>
+
+    <section class="vitals" aria-label="Live vitals">
+      <article class="tile" id="tile-hr" data-state="idle">
+        <header>
+          <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
+          <h2>Heart rate</h2><span class="flag"></span>
+        </header>
+        <div class="reading"><span class="value" id="v-hr">--</span><span class="unit">bpm</span></div>
+        <p class="sub" id="s-hr"></p>
+      </article>
+
+      <article class="tile" id="tile-spo2" data-state="idle">
+        <header>
+          <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s6 6.4 6 11a6 6 0 0 1-12 0c0-4.6 6-11 6-11z"/></svg>
+          <h2>SpO₂</h2><span class="flag"></span>
+        </header>
+        <div class="reading"><span class="value" id="v-spo2">--</span><span class="unit">%</span></div>
+        <p class="sub" id="s-spo2"></p>
+      </article>
+
+      <article class="tile" id="tile-temp" data-state="idle">
+        <header>
+          <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>
+          <h2>Temperature</h2><span class="flag"></span>
+        </header>
+        <div class="reading"><span class="value" id="v-temp">--</span><span class="unit">°C</span></div>
+        <p class="sub" id="s-temp"></p>
+      </article>
+
+      <article class="tile" id="tile-act" data-state="idle">
+        <header>
+          <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="4.5" r="1.8"/><path d="M8 21l3-6 3 2v4M6 11l3.5-3 4 1 2 3 3 1M11 15l-1-5"/></svg>
+          <h2>Activity</h2><span class="flag"></span>
+        </header>
+        <div class="reading"><span class="value" id="v-steps">--</span><span class="unit">steps</span></div>
+        <p class="sub" id="s-act"></p>
+      </article>
+    </section>
+
+    <section class="layout">
+      <div class="panel trends">
+        <div class="panel-head">
+          <h2>Trends</h2>
+          <div class="seg" id="windowSel" role="group" aria-label="Time window">
+            <button type="button" data-win="60000">1m</button>
+            <button type="button" data-win="300000">5m</button>
+            <button type="button" data-win="900000">15m</button>
+            <button type="button" data-win="3600000">1h</button>
+          </div>
+        </div>
+        <div class="chart-row"><div class="chart-label"><span class="swatch" style="--c:var(--c-hr)"></span>Heart rate <em>bpm</em></div><canvas id="c-hr"></canvas></div>
+        <div class="chart-row"><div class="chart-label"><span class="swatch" style="--c:var(--c-spo2)"></span>SpO₂ <em>%</em></div><canvas id="c-spo2"></canvas></div>
+        <div class="chart-row"><div class="chart-label"><span class="swatch" style="--c:var(--c-temp)"></span>Temperature <em>°C</em></div><canvas id="c-temp"></canvas></div>
+        <div class="chart-row"><div class="chart-label"><span class="swatch" style="--c:var(--c-motion)"></span>Movement <em>g</em></div><canvas id="c-motion"></canvas></div>
+      </div>
+
+      <aside class="side">
+        <div class="panel engagement">
+          <div class="panel-head">
+            <h2>Engagement score</h2>
+            <span class="muted small">last 10 min</span>
+          </div>
+          <div class="eng-body">
+            <div class="ring" id="engRing" data-level="none">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="ring-track" cx="60" cy="60" r="52"/>
+                <circle class="ring-fill" id="engArc" cx="60" cy="60" r="52"/>
+              </svg>
+              <div class="ring-center">
+                <span class="ring-score" id="engScore">--</span>
+                <span class="ring-level" id="engLevel">Waiting</span>
+              </div>
+            </div>
+            <ul class="eng-parts" id="engParts">
+              <li data-k="wear"><span>Sensor worn</span><b>--</b><i><s></s></i></li>
+              <li data-k="activity"><span>Activity</span><b>--</b><i><s></s></i></li>
+              <li data-k="stability"><span>Vitals in range</span><b>--</b><i><s></s></i></li>
+              <li data-k="continuity"><span>Data continuity</span><b>--</b><i><s></s></i></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="panel alerts">
+          <div class="panel-head">
+            <h2>Alerts <span class="badge" id="alertBadge" hidden>0</span></h2>
+            <button class="btn ghost small" id="btnAckAll" type="button">Acknowledge all</button>
+          </div>
+          <ol class="alert-list" id="alertList"></ol>
+          <p class="empty" id="alertEmpty">No alerts yet.</p>
+          <div class="alert-opts">
+            <label><input type="checkbox" id="optSound"> Sound</label>
+            <label><input type="checkbox" id="optNotify"> Desktop notifications</label>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="bottom">
+      <div class="panel session">
+        <div class="panel-head"><h2>Device &amp; session</h2></div>
+        <dl class="stats">
+          <div><dt>Device</dt><dd id="devName">—</dd></div>
+          <div><dt>Sensors</dt><dd id="devSensors">—</dd></div>
+          <div><dt>Duration</dt><dd id="sessDur">—</dd></div>
+          <div><dt>Samples</dt><dd id="sessCount">0</dd></div>
+        </dl>
+        <label id="syncOpt" class="sync-opt" hidden>
+          <input type="checkbox" id="optSync"> Upload readings from this device to the patient's cloud record
+        </label>
+        <div class="row-btns">
+          <button class="btn" id="btnExport" type="button">Export data (CSV)</button>
+          <button class="btn" id="btnExportAlerts" type="button">Export alerts (CSV)</button>
+          <button class="btn danger" id="btnClear" type="button">Clear session</button>
+        </div>
+      </div>
+
+      <details class="panel" id="thPanel">
+        <summary>Alert thresholds</summary>
+        <form id="thForm" class="th-form">
+          <label>Heart rate min <input name="hrMin" type="number" step="1"> <span>bpm</span></label>
+          <label>Heart rate max <input name="hrMax" type="number" step="1"> <span>bpm</span></label>
+          <label>SpO₂ min <input name="spo2Min" type="number" step="1"> <span>%</span></label>
+          <label>Temp min <input name="tempMin" type="number" step="0.1"> <span>°C</span></label>
+          <label>Temp max <input name="tempMax" type="number" step="0.1"> <span>°C</span></label>
+          <label>Engagement min <input name="engMin" type="number" step="1"> <span>/100</span></label>
+          <button class="btn ghost small" id="btnThReset" type="button">Restore defaults</button>
+        </form>
+      </details>
+
+      <details class="panel" id="consolePanel">
+        <summary>Serial console</summary>
+        <pre class="console" id="console"></pre>
+        <form id="cmdForm" class="cmd">
+          <input id="cmdInput" type="text" placeholder="Command, e.g. INFO or RESET_STEPS" autocomplete="off">
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </details>
+    </section>
+  </main>
+
+  <script src="js/serial.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/engagement.js"></script>
+  <script src="js/alerts.js"></script>
+  <script src="js/simulator.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Cloud (login + sync) loads only when firebase-config.js is filled in.
+    if (window.CLOUD_ENABLED) {
+      const gate = document.getElementById('authGate');
+      gate.hidden = false;
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = 'js/cloud.js';
+      document.body.appendChild(s);
+      // If Firebase can't be reached (e.g. lab without internet), offer to continue locally.
+      // Local USB data is shown either way; patient data in the cloud stays protected by the database rules.
+      setTimeout(() => {
+        if (!document.body.contains(gate) || !document.getElementById('authGateActions').hidden) return;
+        document.getElementById('authGateMsg').textContent = 'Could not reach Firebase. Check your internet connection.';
+        document.getElementById('authGateActions').hidden = false;
+      }, 10000);
+      document.getElementById('btnOffline').addEventListener('click', () => gate.remove());
+    }
+  </script>
+</body>
+</html>

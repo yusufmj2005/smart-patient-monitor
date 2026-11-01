@@ -1,0 +1,13 @@
+# Local editor / tool settings
+.claude/
+.vscode/
+
+# OS files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Arduino build output
+build/
+*.bin
+*.elf
