@@ -29,6 +29,10 @@
     INFO         re-send the hello line
     RESET_STEPS  zero the step counter
     SCAN         list the I2C devices that answer (also run automatically when a sensor is missing)
+    A0           report the voltage on A0 in mV (wiring diagnostic)
+    RAW          check the MAX30100 still answers and report raw IR/red light levels
+    IRSWEEP      measure the IR level at several LED currents (finger on the sensor)
+    IR <1-15>    set the IR LED current code until restart
 */
 
 #include <ESP8266WiFi.h>
@@ -36,6 +40,10 @@
 #include "MAX30100_PulseOximeter.h"
 
 // ---------- Configuration ----------
+// Turn sensors on/off. A disabled sensor isn't searched for and isn't listed to the dashboard.
+const bool     USE_MPU6050     = true;   // set to false to run without the MPU6050 (D5/D6)
+const bool     USE_LM35        = true;   // set to false to run without the LM35 (A0)
+
 const uint32_t BAUD            = 115200;
 const uint32_t REPORT_MS       = 1000;   // one JSON line per second
 const uint32_t IMU_PERIOD_MS   = 20;     // 50 Hz accelerometer sampling
@@ -47,9 +55,11 @@ const uint8_t  MPU_ADDR        = 0x68;
 const uint8_t  PULSE_ADDR      = 0x57;   // MAX30100 and MAX30102 share this address
 const char*    FW_VERSION      = "1.0.0-max30100";
 
-// IR LED current. 50 mA is the library default and what this sensor worked with originally.
-// If HR is stuck or erratic, try a lower value (MAX30100_LED_CURR_27_1MA, _24MA, ... _7_6MA).
-const LEDCurrent IR_CURRENT = MAX30100_LED_CURR_50MA;
+// IR LED current. Measured with the IRSWEEP command on this board: the IR signal saturates
+// (stuck at 65535, no beats detected) from ~40 mA up, including the library's 50 mA default.
+// 20.8 mA puts it mid-range. Re-run IRSWEEP with a finger on the sensor if you change boards.
+const LEDCurrent IR_CURRENT = MAX30100_LED_CURR_20_8MA;
+LEDCurrent irCurrent = IR_CURRENT;  // active setting; the "IR <code>" command changes it until restart
 
 // ---------- MAX30100 (heart rate + SpO2) ----------
 PulseOximeter pox;
@@ -276,9 +286,12 @@ void sendHello() {
   Serial.print(FW_VERSION);
   Serial.print(F("\",\"sensors\":{\"max30100\":"));
   Serial.print(hasPulse ? F("true") : F("false"));
-  Serial.print(F(",\"mpu6050\":"));
-  Serial.print(hasMpu ? F("true") : F("false"));
-  Serial.println(F(",\"lm35\":true}}"));
+  if (USE_MPU6050) {
+    Serial.print(F(",\"mpu6050\":"));
+    Serial.print(hasMpu ? F("true") : F("false"));
+  }
+  if (USE_LM35) Serial.print(F(",\"lm35\":true"));
+  Serial.println(F("}}"));
 }
 
 void sendError(const __FlashStringHelper* msg) {
@@ -349,28 +362,49 @@ bool probe(uint8_t addr) {
 const uint8_t PROBE_GPIO[] = {4, 5, 0, 2, 14, 12, 13};
 const char* const PROBE_NAME[] = {"D2", "D1", "D3", "D4", "D5", "D6", "D7"};
 
-void findMpuPins() {
+/* Searches every usable pin pair for a device at addrA/addrB and reports where its wires are.
+   requireIdleHigh skips pairs held low (fast); off for the MAX30100, whose 1.8 V pull-ups can read low. */
+bool findDevicePins(uint8_t addrA, uint8_t addrB, bool requireIdleHigh,
+                    const __FlashStringHelper* name, const __FlashStringHelper* advice) {
   const uint8_t n = sizeof(PROBE_GPIO);
   for (uint8_t i = 0; i < n; i++) {
     for (uint8_t j = 0; j < n; j++) {
       if (i == j || (PROBE_GPIO[i] == 4 && PROBE_GPIO[j] == 5)) continue;  // 4/5 = the normal wiring, already scanned
-      if (!pinsIdleHigh(PROBE_GPIO[i], PROBE_GPIO[j])) continue;          // nothing (powered) on a held-low pair
+      if (requireIdleHigh && !pinsIdleHigh(PROBE_GPIO[i], PROBE_GPIO[j])) continue;
       probeBusBegin(PROBE_GPIO[i], PROBE_GPIO[j]);
-      bool found = probe(MPU_ADDR) || probe(MPU_ADDR + 1);
+      bool found = probe(addrA) || (addrB != addrA && probe(addrB));
       yield();
       if (found) {
         Wire.begin(4, 5);
-        Serial.print(F("{\"type\":\"error\",\"msg\":\"MPU6050 found with its SDA wire on "));
+        Serial.print(F("{\"type\":\"error\",\"msg\":\""));
+        Serial.print(name);
+        Serial.print(F(" found with its SDA wire on "));
         Serial.print(PROBE_NAME[i]);
         Serial.print(F(" and its SCL wire on "));
         Serial.print(PROBE_NAME[j]);
-        Serial.println(F(". Move them to D5 (SDA) and D6 (SCL), or share D2/D1 with the MAX30100 through a breadboard.\"}"));
-        return;
+        Serial.print(F(". "));
+        Serial.print(advice);
+        Serial.println(F("\"}"));
+        return true;
       }
     }
   }
   Wire.begin(4, 5);
-  sendError(F("MPU6050 does not answer on any NodeMCU pins. If its red power LED is on, its SDA/SCL wires are loose or broken somewhere between the sensor and the NodeMCU (check breadboard rows). If the LED is off, check VCC and GND."));
+  return false;
+}
+
+void findMpuPins() {
+  if (!findDevicePins(MPU_ADDR, MPU_ADDR + 1, true, F("MPU6050"),
+                      F("Move them to D5 (SDA) and D6 (SCL), or share D2/D1 with the MAX30100 through a breadboard."))) {
+    sendError(F("MPU6050 does not answer on any NodeMCU pins. If its red power LED is on, its SDA/SCL wires are loose or broken somewhere between the sensor and the NodeMCU (check breadboard rows). If the LED is off, check VCC and GND."));
+  }
+}
+
+void findPulsePins() {
+  if (!findDevicePins(PULSE_ADDR, PULSE_ADDR, false, F("MAX30100"),
+                      F("It works, so move them to D2 (SDA) and D1 (SCL)."))) {
+    sendError(F("MAX30100 does not answer on any NodeMCU pins: it has no power (check VIN->3V3 and GND->G with fresh jumper wires) or the module is faulty."));
+  }
 }
 
 /* Scans with the expected wiring and with SDA/SCL swapped, and explains the result. */
@@ -383,10 +417,11 @@ void diagnoseBus() {
   if (normal == 0 && swapped > 0) {
     sendError(F("I2C sensors answer only with SDA/SCL swapped: swap the two wires on D1 and D2."));
   } else if (normal == 0) {
-    sendError(F("No I2C device answers on D1/D2. Check each sensor's VCC->3V3 and GND->G, that SDA/SCL go to D2/D1, and that the sensor header pins are soldered (pins only pushed through the holes don't connect)."));
+    if (!hasPulse) findPulsePins();  // maybe its wires are on other pins
+    else sendError(F("No I2C device answers on D1/D2. Check each sensor's VCC->3V3 and GND->G, that SDA/SCL go to D2/D1, and that the sensor header pins are soldered (pins only pushed through the holes don't connect)."));
   } else {
     if (!p1) {
-      sendError(F("Pulse sensor (0x57) does not answer, but other I2C devices do: check the MAX30100's own wires."));
+      findPulsePins();
     } else if (!hasPulse && pulsePartId != 0x15) {
       Serial.print(F("{\"type\":\"error\",\"msg\":\"A device answers at 0x57 but reports part ID 0x"));
       Serial.print(pulsePartId, HEX);
@@ -394,7 +429,7 @@ void diagnoseBus() {
     }
     if (!m1 && mpuAt69) sendError(F("MPU6050 answers at 0x69 instead of 0x68: connect its AD0 pin to GND."));
     // Search other pins only if the MPU isn't already known to be on D5/D6 (working or unpowered).
-    else if (!m1 && !mpuOwnBus && !mpuLinesLow) findMpuPins();
+    else if (USE_MPU6050 && !m1 && !mpuOwnBus && !mpuLinesLow) findMpuPins();
   }
   Wire.begin(4, 5);       // restores the normal clock-stretch limit too
   Wire.setClock(400000);  // back to the speed the MAX30100 library set
@@ -422,8 +457,8 @@ void setup() {
   }
 
   // MPU6050: first on the shared D2/D1 bus, then on its own D5/D6 pins.
-  hasMpu = mpuInit();
-  if (!hasMpu) {
+  hasMpu = USE_MPU6050 && mpuInit();
+  if (USE_MPU6050 && !hasMpu) {
     mpuOwnBus = true;
     mpuBus.begin(MPU_OWN_SDA, MPU_OWN_SCL);
     mpuLinesLow = !mpuBus.linesHigh();
@@ -433,11 +468,11 @@ void setup() {
   }
   if (mpuLinesLow) {
     sendError(F("D5/D6 are held LOW: the MPU6050 is probably not powered (its red LED should be on; check VCC->3V3 and GND->G) or one of its SDA/SCL wires touches GND."));
-  } else if (!hasMpu) {
+  } else if (USE_MPU6050 && !hasMpu) {
     sendError(F("MPU6050 not found on D2/D1 or D5/D6. Check wiring and that AD0 is connected to GND."));
   }
 
-  if (!hasPulse || !hasMpu) diagnoseBus();
+  if (!hasPulse || (USE_MPU6050 && !hasMpu)) diagnoseBus();
 
   sendHello();
 }
@@ -517,6 +552,96 @@ void report(uint32_t now) {
   fallFlag = false;
 }
 
+/* Signal diagnostic: checks the MAX30100 still answers and reports raw IR/red levels over ~1 s.
+   No finger: low IR. Finger on: much higher IR that varies a little with the pulse.
+   IR stuck near 65535: LED too bright (saturated). (Briefly pauses the pulse algorithm.) */
+void rawDiagnostic() {
+  int id = readPulsePartId();
+  uint16_t irMin = 65535, irMax = 0, redMin = 65535, redMax = 0;
+  uint32_t irSum = 0;
+  uint16_t n = 0;
+  if (id == 0x11) {
+    for (uint8_t i = 0; i < 100; i++) {
+      Wire.beginTransmission(PULSE_ADDR);
+      Wire.write(0x05);  // FIFO_DATA: IR (16 bit) then red (16 bit)
+      if (Wire.endTransmission(false) == 0 && Wire.requestFrom(PULSE_ADDR, (uint8_t)4) == 4) {
+        uint16_t ir = (Wire.read() << 8) | Wire.read();
+        uint16_t red = (Wire.read() << 8) | Wire.read();
+        irMin = min(irMin, ir);
+        irMax = max(irMax, ir);
+        redMin = min(redMin, red);
+        redMax = max(redMax, red);
+        irSum += ir;
+        n++;
+      }
+      delay(10);
+    }
+  }
+  Serial.print(F("{\"type\":\"raw\",\"part_id\":"));
+  Serial.print(id);
+  Serial.print(F(",\"samples\":"));
+  Serial.print(n);
+  if (n) {
+    Serial.print(F(",\"ir_min\":"));
+    Serial.print(irMin);
+    Serial.print(F(",\"ir_max\":"));
+    Serial.print(irMax);
+    Serial.print(F(",\"ir_avg\":"));
+    Serial.print(irSum / n);
+    Serial.print(F(",\"red_min\":"));
+    Serial.print(redMin);
+    Serial.print(F(",\"red_max\":"));
+    Serial.print(redMax);
+  }
+  Serial.println(F("}"));
+}
+
+/* Tries several IR LED currents (finger on the sensor) and reports the IR level for each,
+   to choose IR_CURRENT: pick the highest one whose ir_max stays well below 65535. */
+void irSweep() {
+  if (!hasPulse) {
+    sendError(F("IRSWEEP needs the MAX30100 to be connected."));
+    return;
+  }
+  // LEDCurrent register codes and their currents in mA x10.
+  const uint8_t codes[] = {1, 2, 3, 4, 5, 6, 8, 10, 12, 15};
+  const uint16_t ma10[] = {44, 76, 110, 142, 174, 208, 271, 338, 402, 500};
+  for (uint8_t k = 0; k < sizeof(codes); k++) {
+    pox.setIRLedCurrent((LEDCurrent)codes[k]);
+    delay(150);  // let the new brightness settle
+    uint16_t irMin = 65535, irMax = 0;
+    uint32_t irSum = 0;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 30; i++) {
+      Wire.beginTransmission(PULSE_ADDR);
+      Wire.write(0x05);
+      if (Wire.endTransmission(false) == 0 && Wire.requestFrom(PULSE_ADDR, (uint8_t)4) == 4) {
+        uint16_t ir = (Wire.read() << 8) | Wire.read();
+        Wire.read();
+        Wire.read();
+        irMin = min(irMin, ir);
+        irMax = max(irMax, ir);
+        irSum += ir;
+        n++;
+      }
+      delay(10);
+    }
+    Serial.print(F("{\"type\":\"irsweep\",\"code\":"));
+    Serial.print(codes[k]);
+    Serial.print(F(",\"ma\":"));
+    Serial.print(ma10[k] / 10.0, 1);
+    Serial.print(F(",\"ir_min\":"));
+    Serial.print(n ? irMin : 0);
+    Serial.print(F(",\"ir_max\":"));
+    Serial.print(irMax);
+    Serial.print(F(",\"ir_avg\":"));
+    Serial.print(n ? irSum / n : 0);
+    Serial.println(F("}"));
+    yield();
+  }
+  pox.setIRLedCurrent(irCurrent);  // back to the active setting
+}
+
 void runCommand(String cmd) {
   cmd.trim();
   cmd.toUpperCase();
@@ -526,6 +651,29 @@ void runCommand(String cmd) {
     steps = 0;
   } else if (cmd == "SCAN") {
     diagnoseBus();
+  } else if (cmd == "RAW") {
+    rawDiagnostic();
+  } else if (cmd == "IRSWEEP") {
+    irSweep();
+  } else if (cmd.startsWith("IR ") && hasPulse) {
+    // IR <code 0-15>: change the IR LED current until the next restart (see irSweep for codes).
+    int code = cmd.substring(3).toInt();
+    if (code < 1 || code > 15) {
+      sendError(F("IR needs a code from 1 to 15."));
+      return;
+    }
+    irCurrent = (LEDCurrent)code;
+    pox.setIRLedCurrent(irCurrent);
+  } else if (cmd == "A0") {
+    // Wiring diagnostic: voltage on A0 in millivolts (e.g. put a sensor's SDA wire on A0 to see its idle level).
+    uint32_t sum = 0;
+    for (uint8_t i = 0; i < 16; i++) {
+      sum += analogRead(A0);
+      delay(2);
+    }
+    Serial.print(F("{\"type\":\"info\",\"msg\":\"A0 = "));
+    Serial.print((uint32_t)(sum / 16.0 * ADC_VREF * 1000.0 / 1024.0));
+    Serial.println(F(" mV\"}"));
   } else {
     Serial.print(F("{\"type\":\"error\",\"msg\":\"unknown command\",\"cmd\":\""));
     Serial.print(cmd);
@@ -563,7 +711,7 @@ void loop() {
     readImu(now);
   }
 
-  if (now - lastTempMs >= TEMP_PERIOD_MS) {
+  if (USE_LM35 && now - lastTempMs >= TEMP_PERIOD_MS) {
     lastTempMs = now;
     tempSum += analogRead(A0);
     tempN++;

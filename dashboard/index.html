@@ -30,6 +30,12 @@
       </div>
     </div>
 
+    <nav class="topnav" aria-label="Pages">
+      <a href="index.html" aria-current="page" id="navMonitor">Monitor</a>
+      <a href="patients.html" id="navPatients" hidden>Patients</a>
+      <a href="analysis.html" id="navAnalysis" target="_blank">Analysis &amp; reports</a>
+    </nav>
+
     <!-- Offline mode: type the patient details. With cloud login this is replaced by #patientCtx. -->
     <div class="patient" id="patientLocal">
       <label>Patient <input id="patientName" type="text" placeholder="Name" autocomplete="off"></label>
@@ -192,6 +198,7 @@
           <input type="checkbox" id="optSync"> Upload readings from this device to the patient's cloud record
         </label>
         <div class="row-btns">
+          <button class="btn primary" id="btnAnalyze" type="button">Analyze this session</button>
           <button class="btn" id="btnExport" type="button">Export data (CSV)</button>
           <button class="btn" id="btnExportAlerts" type="button">Export alerts (CSV)</button>
           <button class="btn danger" id="btnClear" type="button">Clear session</button>

@@ -14,7 +14,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {
   getDatabase, ref, get, set, push, update, onValue, onChildAdded,
-  query, orderByChild, startAt, limitToLast,
+  query, orderByChild, startAt, endAt, limitToLast,
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js';
 
 export const app = initializeApp(window.FIREBASE_CONFIG);
@@ -24,7 +24,7 @@ export const db = getDatabase(app);
 export {
   onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, signOut, updateProfile, deleteUser,
-  ref, get, set, push, update, onValue, onChildAdded, query, orderByChild, startAt, limitToLast,
+  ref, get, set, push, update, onValue, onChildAdded, query, orderByChild, startAt, endAt, limitToLast,
 };
 
 /* Loads the signed-in user's profile and whether they are a verified doctor.

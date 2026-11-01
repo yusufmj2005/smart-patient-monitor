@@ -371,15 +371,20 @@
     setTile('spo2', '#v-spo2', s.spo2 ?? '--', lv, flagText(lv, s.spo2, th.spo2Min),
       noFinger ? 'Place finger on the sensor' : s.spo2 == null ? 'Measuring…' : `Normal ≥ ${th.spo2Min}%`);
 
+    // A sensor missing from the board's sensor list has been switched off in the firmware.
+    const notUsed = (key) => state.source === 'usb' && state.sensors && !(key in state.sensors);
+
     lv = levelFor(s.temp, th.tempMin, th.tempMax, null, th.tempMax + 1.5);
     setTile('temp', '#v-temp', s.temp == null ? '--' : s.temp.toFixed(1), lv, flagText(lv, s.temp, th.tempMin),
-      s.temp == null ? 'No reading — check LM35 wiring' : `Normal ${th.tempMin.toFixed(1)}–${th.tempMax.toFixed(1)} °C`);
+      s.temp != null ? `Normal ${th.tempMin.toFixed(1)}–${th.tempMax.toFixed(1)} °C`
+        : notUsed('lm35') ? 'Not in use (LM35 switched off in firmware)' : 'No reading — check LM35 wiring');
 
     const m = s.motion;
     const label = m == null ? '' : m < 0.03 ? 'Resting' : m < 0.1 ? 'Light activity' : 'Active';
     const actLevel = s.fall ? 'critical' : m == null ? 'idle' : 'ok';
     setTile('act', '#v-steps', s.steps ?? '--', actLevel, s.fall ? 'Fall' : label,
-      m == null ? 'No reading — check MPU6050 wiring' : `Movement ${m.toFixed(3)} g`);
+      m != null ? `Movement ${m.toFixed(3)} g`
+        : notUsed('mpu6050') ? 'Not in use (MPU6050 switched off in firmware)' : 'No reading — check MPU6050 wiring');
   }
 
   function renderEngagement() {
@@ -687,6 +692,27 @@
     }
   });
 
+  /* Hands this session's readings to the Analysis page (new tab; sessionStorage is copied to it). */
+  function analyzeSession() {
+    if (!state.samples.length) return sys('Nothing to analyse yet: connect the device or start Demo mode first.');
+    const p = patient();
+    const data = {
+      patient: p,
+      savedAt: Date.now(),
+      records: state.samples.map((s) => [s.ts, s.hr, s.spo2, s.temp, s.motion, s.steps, s.finger, s.fall, s.eng]),
+    };
+    try {
+      sessionStorage.setItem('pm.analysisSession', JSON.stringify(data));
+    } catch {
+      return sys('This session is too large to hand over. Use "Export data (CSV)" and import the file on the Analysis page.', 'err');
+    }
+    const q = new URLSearchParams({ source: 'session' });
+    if (state.ctx) q.set('patient', state.ctx.patient.id);
+    window.open('analysis.html?' + q, '_blank');
+  }
+
+  // Optional chaining: an outdated cached index.html (without the button) must not break the page.
+  $('#btnAnalyze')?.addEventListener('click', analyzeSession);
   $('#btnExport').addEventListener('click', exportData);
   $('#btnExportAlerts').addEventListener('click', exportAlerts);
   $('#btnClear').addEventListener('click', clearSession);

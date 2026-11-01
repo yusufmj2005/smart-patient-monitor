@@ -8,8 +8,10 @@ dashboard/                          Web dashboard (plain HTML/CSS/JS, no build s
   login.html                        Sign in / create account (Doctor or Patient)
   patients.html                     Doctor's patient list
   index.html                        Monitor (a patient's own, or the patient a doctor opened)
+  analysis.html                     Analysis & reports: charts, CSV import, date-wise printable reports
   js/firebase-config.js             ← paste your Firebase web config here
 database.rules.json                 Realtime Database security rules (paste into the Firebase console)
+serve.py                            Local web server (no caching, so updates show up immediately)
 start-dashboard.bat                 Double-click to serve the dashboard and open it in Edge
 ```
 
@@ -51,7 +53,7 @@ If Windows doesn't show a COM port, install the USB driver for your board's chip
 Web Serial only works in **Google Chrome or Microsoft Edge** on a desktop, and only from `localhost` or `https`.
 
 - **Windows:** double-click `start-dashboard.bat`.
-- **Any OS:** run `python -m http.server 8000 --directory dashboard`, then open http://localhost:8000.
+- **Any OS:** run `python serve.py`, then open http://localhost:8000.
 
 Click **Connect USB** and choose the NodeMCU's port (it shows up as CH340 or CP210x). Readings start within a few seconds. Place a finger on the MAX30102 and hold it still for about 5 s to get HR and SpO₂.
 
@@ -125,6 +127,26 @@ Other behavior:
   Alerts are debounced and shown with severity, active/resolved status and acknowledgement. Sound and desktop notifications are optional. Thresholds can be edited in the page.
 - **Serial console:** shows the raw device output and lets you send commands (`INFO`, `RESET_STEPS`).
 - **Export:** session vitals and alert log as CSV. The vitals CSV is the training data for the engagement model.
+
+## Analysis & reports
+
+Open **Analysis & reports** from the top bar, or click **Analyze this session** on the monitor.
+
+- **Data sources**
+  - **Cloud history:** the patient's saved readings from Firebase. Doctors pick the patient.
+  - **Imported CSV:** drag in one or more files. The monitor's "Export data (CSV)" files work, and so do other CSVs that have a time column plus heart rate / SpO₂ / temperature columns. Comma or semicolon separators, ISO or day/month/year dates. Files are read in the browser and not uploaded.
+  - **Session from the monitor:** the readings currently shown on the monitor tab.
+- **Period:** Today, Yesterday, 7 days, 30 days, All, or any From/To dates. Everything below follows the same period.
+- **Analysis view**
+  - an overall verdict and averages with a status label for each vital
+  - plain-language findings ("Heart rate … was in the normal range 96% of the time…")
+  - time-in-range bars
+  - trend charts with the normal range shaded (hover, or use the arrow keys, for values)
+  - day-by-day charts and table
+  - out-of-range events, meaning episodes of 10 s or longer, and possible falls
+- **Report view:** a printable report for the chosen dates, either one report for the whole period or **one page per day**. It contains patient details, summary, key measurements, trends, a day-by-day table, events and, for cloud data, the alerts raised by the monitor. Use **Print / Save as PDF**.
+
+Normal ranges follow the alert thresholds set on the monitor page.
 
 ## Serial protocol
 

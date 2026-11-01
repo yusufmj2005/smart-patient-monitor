@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analysis &amp; reports · Patient Monitor</title>
+  <meta name="description" content="Vital-sign analysis with charts, CSV import and date-wise printable reports.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2-5 4 10 2-5h6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/firebase-config.js"></script>
+</head>
+<body class="an-page">
+  <div id="authGate" class="auth-gate" hidden>
+    <div class="auth-gate-box">
+      <p id="authGateMsg">Checking sign-in…</p>
+      <div id="authGateActions" class="row-btns" hidden>
+        <button class="btn primary" type="button" onclick="location.reload()">Retry</button>
+        <button class="btn" type="button" id="btnOffline">Continue offline (CSV only)</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>
+      <div>
+        <h1>Smart Patient Monitor</h1>
+        <p class="brand-sub">Analysis &amp; reports</p>
+      </div>
+    </div>
+    <nav class="topnav" aria-label="Pages">
+      <a id="navMonitor" href="index.html">Monitor</a>
+      <a id="navPatients" href="patients.html" hidden>Patients</a>
+      <a href="analysis.html" aria-current="page">Analysis &amp; reports</a>
+    </nav>
+    <div id="account" class="account" hidden>
+      <span id="acctRole" class="role-badge"></span>
+      <span id="acctName" class="acct-email"></span>
+      <button id="btnSignOut" class="btn ghost small" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <main class="an-main">
+    <!-- Filters: one row, scoping everything below -->
+    <section class="panel an-filters" aria-label="Data and period">
+      <div class="an-row">
+        <label class="an-field">
+          <span>Data</span>
+          <select id="srcSel"></select>
+        </label>
+        <label class="an-field" id="patientWrap" hidden>
+          <span>Patient</span>
+          <select id="patientSel"></select>
+        </label>
+        <div class="an-field">
+          <span>Period</span>
+          <div class="seg" id="presetSel" role="group" aria-label="Quick periods">
+            <button type="button" data-preset="today">Today</button>
+            <button type="button" data-preset="yesterday">Yesterday</button>
+            <button type="button" data-preset="7">7 days</button>
+            <button type="button" data-preset="30">30 days</button>
+            <button type="button" data-preset="all" id="presetAll">All</button>
+          </div>
+        </div>
+        <label class="an-field">
+          <span>From</span>
+          <input type="date" id="fromDate">
+        </label>
+        <label class="an-field">
+          <span>To</span>
+          <input type="date" id="toDate">
+        </label>
+      </div>
+
+      <div id="csvBox" class="an-import" hidden>
+        <div id="dropZone" class="dropzone" tabindex="0" role="button" aria-label="Import CSV files">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7 8m5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
+          <div>
+            <b>Drop CSV files here</b> or <span class="linklike">choose files</span>
+            <div class="muted small">The dashboard's "Export data (CSV)" files, or any CSV with a time column and heart rate / SpO₂ / temperature columns.</div>
+          </div>
+          <input type="file" id="fileInput" accept=".csv,text/csv" multiple hidden>
+        </div>
+        <div class="an-import-side">
+          <p id="importInfo" class="small"></p>
+          <label class="an-field">
+            <span>Patient name (for the report)</span>
+            <input type="text" id="csvName" placeholder="Name" autocomplete="off">
+          </label>
+          <button class="btn ghost small" type="button" id="btnClearCsv" hidden>Remove imported data</button>
+        </div>
+      </div>
+      <p id="loadNote" class="small muted an-note" role="status"></p>
+    </section>
+
+    <div class="an-tabs" role="tablist">
+      <button type="button" role="tab" id="tabAnalysis" aria-selected="true" aria-controls="viewAnalysis">Analysis</button>
+      <button type="button" role="tab" id="tabReport" aria-selected="false" aria-controls="viewReport">Report</button>
+    </div>
+
+    <!-- Analysis -->
+    <section id="viewAnalysis" role="tabpanel" aria-labelledby="tabAnalysis">
+      <div id="anEmpty" class="panel an-emptystate" hidden></div>
+      <div id="anContent" hidden>
+        <div id="verdict" class="an-verdict"></div>
+        <div id="tiles" class="an-tiles"></div>
+
+        <div class="an-grid">
+          <div class="panel">
+            <div class="panel-head"><h2>What this means</h2></div>
+            <ul id="insights" class="insights"></ul>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Time in normal range</h2></div>
+            <div id="tirList" class="tir-list"></div>
+            <p class="small muted">Share of the measured time each vital sign spent below, inside and above its normal range.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Trends</h2>
+            <span class="small muted">Shaded band = normal range · hover or use arrow keys for values</span>
+          </div>
+          <div id="trends" class="an-trends"></div>
+        </div>
+
+        <div class="panel" id="dailyPanel">
+          <div class="panel-head">
+            <h2>Day by day</h2>
+            <span class="small muted" id="dailyHint"></span>
+          </div>
+          <div id="dailyCharts" class="an-daily"></div>
+          <div class="table-wrap"><table class="an-table" id="dailyTable"></table></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Out-of-range events</h2></div>
+          <div class="table-wrap"><table class="an-table" id="eventsTable"></table></div>
+          <p class="small muted" id="eventsNote"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Report -->
+    <section id="viewReport" role="tabpanel" aria-labelledby="tabReport" hidden>
+      <div class="panel report-actions">
+        <label class="an-field">
+          <span>Layout</span>
+          <select id="reportMode">
+            <option value="period">One report for the whole period</option>
+            <option value="daily">One page per day</option>
+          </select>
+        </label>
+        <button class="btn primary" type="button" id="btnPrint">Print / Save as PDF</button>
+        <span class="small muted">To save a PDF, choose "Save as PDF" as the printer.</span>
+      </div>
+      <div id="reportWrap"></div>
+    </section>
+  </main>
+
+  <script type="module" src="js/analysis.js"></script>
+</body>
+</html>

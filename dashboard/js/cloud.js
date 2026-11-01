@@ -106,6 +106,10 @@ onAuthStateChanged(auth, async (u) => {
   acct = a;
   pid = target;
 
+  // Guarded: an outdated cached index.html may not have the navigation links yet.
+  const navPatients = $('#navPatients'), navAnalysis = $('#navAnalysis');
+  if (navPatients && a.profile.role === 'doctor') navPatients.hidden = false;
+  if (navAnalysis) navAnalysis.href = `analysis.html?patient=${encodeURIComponent(pid)}`;
   $('#acctEmail').textContent = a.profile.name || u.email;
   $('#acctRole').textContent = a.profile.role === 'doctor' ? 'Doctor' : 'Patient';
   $('#account').hidden = false;
