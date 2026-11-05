@@ -138,10 +138,10 @@ Open **Analysis & reports** from the top bar, or click **Analyze this session** 
   - **Session from the monitor:** the readings currently shown on the monitor tab.
 - **Period:** Today, Yesterday, 7 days, 30 days, All, or any From/To dates. Everything below follows the same period.
 - **Analysis view**
-  - an overall verdict and averages with a status label for each vital
+  - an overall verdict that names the problems and suggests what to do next, plus averages with a status label for each vital
   - plain-language findings ("Heart rate … was in the normal range 96% of the time…")
   - time-in-range bars
-  - trend charts with the normal range shaded (hover, or use the arrow keys, for values)
+  - trend charts with the normal range shaded (hover, or use the arrow keys, for values); long breaks between recordings are collapsed and marked with a dashed line
   - day-by-day charts and table
   - out-of-range events, meaning episodes of 10 s or longer, and possible falls
 - **Report view:** a printable report for the chosen dates, either one report for the whole period or **one page per day**. It contains patient details, summary, key measurements, trends, a day-by-day table, events and, for cloud data, the alerts raised by the monitor. Use **Print / Save as PDF**.

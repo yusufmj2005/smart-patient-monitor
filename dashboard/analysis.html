@@ -6,7 +6,7 @@
   <title>Analysis &amp; reports · Patient Monitor</title>
   <meta name="description" content="Vital-sign analysis with charts, CSV import and date-wise printable reports.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2-5 4 10 2-5h6'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=20261105">
   <script src="js/firebase-config.js"></script>
 </head>
 <body class="an-page">
@@ -120,7 +120,7 @@
         <div class="panel">
           <div class="panel-head">
             <h2>Trends</h2>
-            <span class="small muted">Shaded band = normal range · hover or use arrow keys for values</span>
+            <span class="small muted">Shaded band = normal range · dashed line = gap between recordings · hover or use arrow keys for values</span>
           </div>
           <div id="trends" class="an-trends"></div>
         </div>
@@ -135,7 +135,7 @@
         </div>
 
         <div class="panel">
-          <div class="panel-head"><h2>Out-of-range events</h2></div>
+          <div class="panel-head"><h2>Events to review</h2></div>
           <div class="table-wrap"><table class="an-table" id="eventsTable"></table></div>
           <p class="small muted" id="eventsNote"></p>
         </div>
@@ -159,6 +159,6 @@
     </section>
   </main>
 
-  <script type="module" src="js/analysis.js"></script>
+  <script type="module" src="js/analysis.js?v=20261105"></script>
 </body>
 </html>

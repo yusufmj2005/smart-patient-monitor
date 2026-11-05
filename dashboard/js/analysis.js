@@ -10,9 +10,9 @@
 
 import {
   VITALS, loadThresholds, importCSV, mergeRecords, analyze, byDay, downsample,
-  insights, overall, fmt, withUnit, rangeText, STATUS_TEXT, dayKey,
-} from './analysis-data.js';
-import { lineChart, dailyRange, dailyColumns, rangeBar } from './analysis-charts.js';
+  insights, overall, nextSteps, fmt, withUnit, rangeText, STATUS_TEXT, dayKey,
+} from './analysis-data.js?v=20261105';
+import { lineChart, dailyRange, dailyColumns, rangeBar } from './analysis-charts.js?v=20261105';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -56,6 +56,20 @@ const h = (tag, attrs = {}, ...children) => {
 const STATUS_ICON = { good: '✓', watch: '!', concern: '!', none: '–', info: 'i' };
 const statusChip = (level, text = STATUS_TEXT[level]) =>
   h('span', { class: `st-chip st-${level}` }, h('span', { class: 'st-icon', 'aria-hidden': 'true', text: STATUS_ICON[level] }), text);
+
+const insightItems = (a, sameDay) => insights(a, state.th, sameDay).map((i) =>
+  h('li', { class: `st-${i.level}` },
+    h('span', { class: 'st-icon', 'aria-hidden': 'true', text: STATUS_ICON[i.level] }),
+    h('span', {}, h('b', { text: `${i.label}: ` }), i.text)));
+
+/* "What to do next" under the verdict; empty string when there is nothing to do. */
+function nextStepsBlock(a) {
+  const steps = nextSteps(a);
+  if (!steps.length) return '';
+  return h('div', { class: 'an-next' },
+    h('b', { text: 'What to do next' }),
+    h('ul', {}, ...steps.map((t) => h('li', { text: t }))));
+}
 
 const toDateInput = (ts) => dayKey(ts);
 const fromDateInput = (v) => {
@@ -450,17 +464,19 @@ function render() {
   $('#verdict').className = `an-verdict st-${v.level}`;
   $('#verdict').replaceChildren(
     statusChip(v.level, v.level === 'good' ? 'All normal' : STATUS_TEXT[v.level]),
-    h('span', { text: v.text }),
+    h('span', { class: 'an-verdict-text', text: v.text }),
     h('span', { class: 'muted small', text: `${fmt.num(a.count)} readings · ${fmt.dur(a.measuredMs)} recorded · ${periodText(sameDay)}` }),
+    nextStepsBlock(a),
   );
 
   // Stat tiles
   const tiles = [];
   for (const s of Object.values(a.vitals)) {
     tiles.push(h('div', { class: 'an-tile' },
-      h('span', { class: 'an-tile-label' }, h('i', { class: 'an-swatch', style: `--c: var(${s.def.colorVar})` }), s.def.short),
+      h('span', { class: 'an-tile-label' }, h('i', { class: 'an-swatch', style: `--c: var(${s.def.colorVar})` }), s.def.label),
       h('span', { class: 'an-tile-value', text: s.n ? withUnit(s.mean, s.def) : '—' }),
-      h('span', { class: 'an-tile-sub', text: s.n ? `Lowest ${withUnit(s.min.v, s.def)} · highest ${withUnit(s.max.v, s.def)}` : 'No readings' }),
+      h('span', { class: 'an-tile-sub', text: s.n ? `Average. Lowest ${withUnit(s.min.v, s.def)}, highest ${withUnit(s.max.v, s.def)}` : 'No readings' }),
+      h('span', { class: 'an-tile-sub', text: `Normal: ${rangeText(s.def, state.th)}` }),
       statusChip(s.n ? s.status : 'none'),
     ));
   }
@@ -470,7 +486,7 @@ function render() {
     h('span', { class: 'an-tile-sub', text: a.activePct != null ? `Moving ${fmt.num(a.activePct)}% of the time` : 'No movement data' }),
   ));
   tiles.push(h('div', { class: 'an-tile' },
-    h('span', { class: 'an-tile-label', text: 'Engagement' }),
+    h('span', { class: 'an-tile-label', text: 'Engagement score' }),
     h('span', { class: 'an-tile-value', text: a.engagement != null ? `${fmt.num(a.engagement)}/100` : '—' }),
     h('span', { class: 'an-tile-sub', text: a.wornPct != null ? `Sensor worn ${fmt.num(a.wornPct)}% of the time` : '' }),
     a.engagement != null ? statusChip(a.engagementLevel === 'good' ? 'good' : a.engagementLevel === 'moderate' ? 'watch' : 'concern',
@@ -479,13 +495,12 @@ function render() {
   $('#tiles').replaceChildren(...tiles);
 
   // Insights
-  $('#insights').replaceChildren(...insights(a, state.th, sameDay).map((i) =>
-    h('li', { class: `st-${i.level}` }, h('span', { class: 'st-icon', 'aria-hidden': 'true', text: STATUS_ICON[i.level] }), h('span', { text: i.text }))));
+  $('#insights').replaceChildren(...insightItems(a, sameDay));
 
   // Time in range
   $('#tirList').replaceChildren(...Object.values(a.vitals).map((s) => {
     const row = h('div', { class: 'tir-row' },
-      h('div', { class: 'tir-head' }, h('b', { text: s.def.short }), h('span', { class: 'muted small', text: `normal ${rangeText(s.def, state.th)}` })));
+      h('div', { class: 'tir-head' }, h('b', { text: s.def.label }), h('span', { class: 'muted small', text: `normal: ${rangeText(s.def, state.th)}` })));
     const box = h('div');
     row.append(box);
     if (s.n) rangeBar(box, { pctLow: s.pctLow, pctNormal: s.pctNormal, pctHigh: s.pctHigh, hasHigh: s.def.hi(state.th) != null, label: s.def.short });
@@ -589,7 +604,7 @@ function fillDailyTable(table, rows) {
   const v = (s, which) => (s.n ? withUnit(which === 'mean' ? s.mean : s[which].v, s.def) : '—');
   table.replaceChildren(
     h('thead', {}, h('tr', {},
-      ...['Date', 'Recorded', 'Heart rate avg (range)', 'SpO₂ avg (lowest)', 'Temperature avg (highest)', 'Steps', 'Engagement', 'Events', 'Status']
+      ...['Date', 'Recorded', 'Heart rate: average (range)', 'SpO₂: average (lowest)', 'Temperature: average (highest)', 'Steps', 'Engagement', 'Events', 'Status']
         .map((t, i) => h('th', { class: i && i < 8 ? 'num' : null, scope: 'col', text: t })))),
     h('tbody', {}, ...rows.map(({ label, a }) => {
       const hr = a.vitals.hr, sp = a.vitals.spo2, tp = a.vitals.temp;
@@ -623,7 +638,7 @@ function renderEvents(table, a, sameDay) {
         h('td', { text: when(e.start) }),
         h('td', { text: EVENT_NAME[e.vital][e.kind] }),
         h('td', { class: 'num', text: e.kind === 'fall' ? '—' : fmt.dur(e.end - e.start) }),
-        h('td', { class: 'num', text: def ? withUnit(e.worst, def) : '—' }),
+        h('td', { class: 'num', text: def ? withUnit(e.worst, def) : e.count > 1 ? `${e.count} signals` : '—' }),
         h('td', {}, statusChip(e.critical ? 'concern' : 'watch', e.critical ? 'Serious' : 'Mild')),
       );
     })),
@@ -724,9 +739,8 @@ function reportPage(recs, from, to, title) {
     h('table', { class: 'rep-meta' }, h('tbody', {}, ...meta.map(([k, val]) => h('tr', {}, h('th', { scope: 'row', text: k }), h('td', { text: val }))))),
     h('section', { class: 'rep-section' },
       h('h3', { text: 'Summary' }),
-      h('div', { class: `an-verdict st-${v.level}` }, statusChip(v.level, v.level === 'good' ? 'All normal' : STATUS_TEXT[v.level]), h('span', { text: v.text })),
-      h('ul', { class: 'insights' }, ...insights(a, state.th, sameDay).map((i) =>
-        h('li', { class: `st-${i.level}` }, h('span', { class: 'st-icon', 'aria-hidden': 'true', text: STATUS_ICON[i.level] }), h('span', { text: i.text }))))),
+      h('div', { class: `an-verdict st-${v.level}` }, statusChip(v.level, v.level === 'good' ? 'All normal' : STATUS_TEXT[v.level]), h('span', { class: 'an-verdict-text', text: v.text }), nextStepsBlock(a)),
+      h('ul', { class: 'insights' }, ...insightItems(a, sameDay))),
     h('section', { class: 'rep-section' },
       h('h3', { text: 'Key measurements' }),
       h('div', { class: 'table-wrap' }, h('table', { class: 'an-table' },
@@ -735,7 +749,7 @@ function reportPage(recs, from, to, title) {
         h('tbody', {}, ...keyRows)))),
     h('section', { class: 'rep-section rep-break-ok' },
       h('h3', { text: 'Trends' }),
-      h('p', { class: 'muted small', text: 'Shaded band = normal range.' }),
+      h('p', { class: 'muted small', text: 'Shaded band = normal range. Dashed line = gap between recordings.' }),
       trends),
   ];
   if (!sameDay) {
@@ -744,7 +758,7 @@ function reportPage(recs, from, to, title) {
     sections.push(h('section', { class: 'rep-section' }, h('h3', { text: 'Day by day' }), h('div', { class: 'table-wrap' }, t)));
   }
   sections.push(h('section', { class: 'rep-section' },
-    h('h3', { text: 'Out-of-range events' }),
+    h('h3', { text: 'Events to review' }),
     a.events.length ? h('div', { class: 'table-wrap' }, eventsTable) : h('p', { class: 'muted', text: 'No out-of-range episodes (of 10 seconds or longer) in this period.' })));
 
   if (state.source === 'cloud') {

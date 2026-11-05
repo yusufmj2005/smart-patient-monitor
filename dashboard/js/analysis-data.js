@@ -17,6 +17,9 @@ export function loadThresholds() {
 }
 
 export const ACTIVE_G = 0.05;
+const FALL_MERGE_MS = 60000;     // fall signals this close together are one incident
+const SHORT_RECORDING_MS = 10 * 60000;
+const SKIN_TEMP_MIN = 34;        // below this the LM35 is more likely reading air than skin
 
 /* The vitals that have a normal range. lo/hi = normal range, critLo/critHi = clearly abnormal. */
 export const VITALS = {
@@ -299,7 +302,13 @@ export function analyze(recs, th) {
       if (r.motion >= ACTIVE_G) activeMs += w[i];
     }
     if (r.eng != null) { engSum += r.eng; engN++; }
-    if (r.fall) falls.push({ vital: 'fall', kind: 'fall', start: r.ts, end: r.ts, critical: true });
+    if (r.fall) {
+      const prev = falls[falls.length - 1];
+      if (prev && r.ts - prev.end <= FALL_MERGE_MS) {
+        prev.end = r.ts;
+        prev.count++;
+      } else falls.push({ vital: 'fall', kind: 'fall', start: r.ts, end: r.ts, count: 1, critical: true });
+    }
   }
 
   const engagement = engN ? engSum / engN : null;
@@ -385,7 +394,7 @@ export const fmt = {
 /* "72 bpm", "97%", "36.8 °C" */
 export const withUnit = (v, def) => (v == null ? '—' : fmt.num(v, def.decimals) + (def.unit === '%' ? '%' : ' ' + def.unit));
 
-export const STATUS_TEXT = { good: 'Normal', watch: 'Some readings outside range', concern: 'Needs attention', none: 'No data' };
+export const STATUS_TEXT = { good: 'Normal', watch: 'Mostly normal', concern: 'Needs attention', none: 'No data' };
 
 const rangeText = (def, th) => {
   const lo = def.lo(th), hi = def.hi(th);
@@ -393,7 +402,7 @@ const rangeText = (def, th) => {
 };
 export { rangeText };
 
-/* Plain-language findings: [{ level: 'good'|'watch'|'concern'|'info', text }]. */
+/* Plain-language findings: [{ level: 'good'|'watch'|'concern'|'info', label, text }]. */
 export function insights(a, th, sameDay) {
   if (a.empty) return [];
   const when = (ts) => (sameDay ? fmt.time(ts) : fmt.dateTime(ts));
@@ -402,48 +411,94 @@ export function insights(a, th, sameDay) {
   for (const s of Object.values(a.vitals)) {
     const def = s.def;
     if (!s.n) {
-      out.push({ level: 'info', text: `No ${def.short.toLowerCase()} readings in this period.` });
+      out.push({ level: 'info', label: def.label, text: 'No readings in this period.' });
       continue;
     }
-    let text = `${def.short} averaged ${withUnit(s.mean, def)} and was in the normal range (${rangeText(def, th)}) ${fmt.num(s.pctNormal)}% of the time.`;
-    const highs = s.episodes.filter((e) => e.kind === 'high');
-    const lows = s.episodes.filter((e) => e.kind === 'low');
-    if (highs.length) {
-      const total = highs.reduce((t, e) => t + e.end - e.start, 0);
-      text += ` It was high for ${fmt.dur(total)} in ${highs.length} episode${highs.length > 1 ? 's' : ''}, highest ${withUnit(s.max.v, def)} at ${when(s.max.ts)}.`;
-    }
-    if (lows.length) {
-      const total = lows.reduce((t, e) => t + e.end - e.start, 0);
-      text += ` It was low for ${fmt.dur(total)} in ${lows.length} episode${lows.length > 1 ? 's' : ''}, lowest ${withUnit(s.min.v, def)} at ${when(s.min.ts)}.`;
-    }
-    out.push({ level: s.status, text });
+    out.push({ level: s.status, label: def.label, text: vitalSentence(s, th) });
   }
 
   if (a.falls.length) {
-    out.push({ level: 'concern', text: `${a.falls.length} possible fall${a.falls.length > 1 ? 's were' : ' was'} detected (${a.falls.map((f) => when(f.start)).join(', ')}).` });
+    const signals = (f) => (f.count > 1 ? ` (${f.count} signals within a minute)` : '');
+    out.push({
+      level: 'concern',
+      label: a.falls.length > 1 ? `${a.falls.length} possible falls` : 'Possible fall',
+      text: `Detected at ${a.falls.map((f) => when(f.start) + signals(f)).join(', ')}. Knocking or moving the sensor can also trigger this.`,
+    });
   }
   if (a.steps != null) {
-    out.push({ level: 'info', text: `${fmt.num(a.steps)} steps were counted; the patient was moving ${fmt.num(a.activePct)}% of the recorded time.` });
+    out.push({ level: 'info', label: 'Activity', text: `${fmt.num(a.steps)} steps counted; moving ${fmt.num(a.activePct)}% of the recorded time.` });
   }
   if (a.engagement != null) {
-    const lvl = { good: 'good', moderate: 'moderate', low: 'low' }[a.engagementLevel];
     out.push({
       level: a.engagementLevel === 'good' ? 'good' : a.engagementLevel === 'moderate' ? 'watch' : 'concern',
-      text: `Average engagement score was ${fmt.num(a.engagement)} out of 100 (${lvl}).`,
+      label: 'Engagement',
+      text: `${fmt.num(a.engagement)} out of 100 (${a.engagementLevel}). This combines sensor wear, movement, normal readings and steady data.`,
     });
   }
   if (a.wornPct != null && a.wornPct < 80) {
-    out.push({ level: 'watch', text: `The sensor was worn only ${fmt.num(a.wornPct)}% of the recorded time, so some readings are missing.` });
+    out.push({ level: 'watch', label: 'Sensor wear', text: `Worn only ${fmt.num(a.wornPct)}% of the recorded time, so some readings are missing.` });
+  }
+  if (a.measuredMs < SHORT_RECORDING_MS) {
+    out.push({ level: 'info', label: 'Recording length', text: `Only ${fmt.dur(a.measuredMs)} recorded, so this is a snapshot, not a full picture.` });
   }
   return out;
 }
 
-/* One-sentence overall verdict for the top of the report. */
+function vitalSentence(s, th) {
+  const def = s.def;
+  const avg = `Average ${withUnit(s.mean, def)}`;
+  const normal = `normal is ${rangeText(def, th)}`;
+  if (s.pctNormal >= 99.5) return `Normal the whole time. ${avg}.`;
+  if (s.pctNormal < 0.5) {
+    const side = s.pctHigh < 0.5 ? 'Below normal' : s.pctLow < 0.5 ? 'Above normal' : 'Outside normal';
+    return `${side} the whole time. ${avg}; ${normal}.${implausiblyCold(s) ? ' Readings this low usually mean the sensor is not pressed against the skin, not that the patient is cold.' : ''}`;
+  }
+  const extremes = [s.pctLow >= 0.5 ? `as low as ${withUnit(s.min.v, def)}` : null, s.pctHigh >= 0.5 ? `as high as ${withUnit(s.max.v, def)}` : null].filter(Boolean).join(' and ');
+  let text = `Normal ${fmt.num(s.pctNormal)}% of the time. ${avg}; ${normal}. It went ${extremes}`;
+  if (s.episodes.length) {
+    const total = s.episodes.reduce((t, e) => t + e.end - e.start, 0);
+    text += `, staying out of range for ${fmt.dur(total)} in ${s.episodes.length} episode${s.episodes.length > 1 ? 's' : ''}.`;
+  } else {
+    text += '. These were brief changes of under 10 seconds, which usually come from moving the finger on the sensor.';
+  }
+  return text;
+}
+
+const implausiblyCold = (s) => s.def.key === 'temp' && s.p50 < SKIN_TEMP_MIN;
+const mostlyLow = (s) => s.pctLow >= s.pctHigh;
+
+/* One-sentence-per-problem verdict for the top of the page and the report. */
 export function overall(a) {
   if (a.empty) return { level: 'none', text: 'No readings in this period.' };
-  const st = Object.values(a.vitals).filter((s) => s.n).map((s) => s.status);
-  if (a.falls.length || st.includes('concern')) return { level: 'concern', text: 'Some readings need attention. See the details below.' };
-  if (st.includes('watch')) return { level: 'watch', text: 'Mostly normal, with some readings outside the normal range.' };
-  if (!st.length) return { level: 'none', text: 'No vital-sign readings in this period.' };
+  const measured = Object.values(a.vitals).filter((s) => s.n);
+  const st = measured.map((s) => s.status);
+  if (!st.length && !a.falls.length) return { level: 'none', text: 'No vital-sign readings in this period.' };
+  const parts = [];
+  if (a.falls.length) parts.push(a.falls.length > 1 ? `${a.falls.length} possible falls detected.` : 'Possible fall detected.');
+  for (const s of measured) {
+    if (s.status === 'concern') parts.push(`${s.def.short} read ${mostlyLow(s) ? 'below' : 'above'} normal.`);
+    else if (s.status === 'watch') parts.push(`${s.def.short} was briefly outside normal.`);
+  }
+  if (a.falls.length || st.includes('concern')) return { level: 'concern', text: parts.join(' ') };
+  if (st.includes('watch')) return { level: 'watch', text: parts.join(' ') };
   return { level: 'good', text: 'All measured vital signs stayed in the normal range.' };
+}
+
+/* Practical follow-ups for the verdict, most urgent first. */
+export function nextSteps(a) {
+  if (a.empty) return [];
+  const { hr, spo2, temp } = a.vitals;
+  const out = [];
+  const flagged = (s) => s.n && s.status !== 'good';
+  if (a.falls.length) out.push('Check on the patient and confirm whether a fall really happened.');
+  if (flagged(spo2)) out.push('Re-check blood oxygen with the finger held still; contact a doctor if it stays low.');
+  if (flagged(temp)) {
+    out.push(implausiblyCold(temp)
+      ? 'Press the temperature sensor firmly against the skin, then record again.'
+      : 'Confirm the temperature with a clinical thermometer.');
+  }
+  if (flagged(hr)) out.push('Re-check heart rate while the patient rests with a still finger.');
+  if (a.wornPct != null && a.wornPct < 80) out.push('Keep the sensor on for the whole recording so fewer readings are missed.');
+  if (a.measuredMs < SHORT_RECORDING_MS) out.push('Record for at least 10 minutes for a more reliable picture.');
+  return out;
 }

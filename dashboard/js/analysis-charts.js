@@ -110,6 +110,56 @@ function timeTicks(t0, t1, width) {
   return ticks.map((t) => ({ t, label: label(t) }));
 }
 
+/* Y labels with enough decimals for the step, so 0.15 steps don't round to 0.2, 0.3, 0.5. */
+function tickText(v, step) {
+  if (step >= 1 && Number.isInteger(step)) return v.toFixed(0);
+  const tenths = step * 10;
+  return v.toFixed(Math.abs(tenths - Math.round(tenths)) < 1e-6 ? 1 : 2);
+}
+
+/* Maps time to x with long breaks between recordings collapsed, so a 1-minute recording
+   isn't squeezed into a dot on a multi-day axis. Each recording gets width by duration. */
+const BREAK_MS = 30 * 60e3, BREAK_PX = 24, MIN_SESSION_PX = 40;
+
+function sessionScale(points, gapMs, x0, width) {
+  const limit = Math.max(BREAK_MS, gapMs);
+  let sessions = [{ a: points[0].t, b: points[0].t }];
+  for (const p of points) {
+    const s = sessions[sessions.length - 1];
+    if (p.t - s.b > limit) sessions.push({ a: p.t, b: p.t });
+    else s.b = p.t;
+  }
+  const avail = width - BREAK_PX * (sessions.length - 1);
+  if (avail < sessions.length * MIN_SESSION_PX) sessions = [{ a: points[0].t, b: points[points.length - 1].t }];
+  if (sessions.length === 1) sessions[0].w = width;
+  else {
+    let free = avail, rest = sessions;
+    const share = (s) => {
+      const total = rest.reduce((t, r) => t + r.b - r.a, 0);
+      return total ? (free * (s.b - s.a)) / total : free / rest.length;
+    };
+    for (;;) {
+      const small = rest.filter((s) => share(s) < MIN_SESSION_PX);
+      if (!small.length || small.length === rest.length) break;
+      small.forEach((s) => { s.w = MIN_SESSION_PX; });
+      free -= MIN_SESSION_PX * small.length;
+      rest = rest.filter((s) => !small.includes(s));
+    }
+    rest.forEach((s) => { s.w = share(s); });
+  }
+  let cur = x0;
+  for (const s of sessions) {
+    s.x = cur;
+    cur += s.w + BREAK_PX;
+  }
+  const x = (t) => {
+    let s = sessions[0];
+    for (const c of sessions) if (c.a <= t) s = c;
+    return s.b > s.a ? s.x + ((t - s.a) / (s.b - s.a)) * s.w : s.x + s.w / 2;
+  };
+  return { sessions, x };
+}
+
 const fmtVal = (v, decimals, unit) => Number(v).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + (unit === '%' ? '%' : ' ' + unit);
 
 const fmtWhen = (t, multiDay) => new Date(t).toLocaleString(undefined, multiDay
@@ -135,13 +185,13 @@ export function lineChart(host, o) {
     const W = host.clientWidth, H = o.height || 200;
     if (!W) return;  // hidden (e.g. other tab): drawn when it becomes visible
     const pad = { l: 44, r: 14, t: 12, b: 28 };
+    // The time axis covers only where the data is, with long breaks collapsed.
+    const { sessions, x } = sessionScale(o.points, gapMs, pad.l, W - pad.l - pad.r);
+    const split = sessions.length > 1;
+    if (split) pad.b = 42;  // room for a date row
     const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
-    // Zoom the time axis to where the data is, inside the selected period.
-    const t0 = Math.max(o.from, o.points[0].t), t1 = Math.min(o.to, o.points[o.points.length - 1].t);
-    const span = Math.max(t1 - t0, 60e3);
     const values = o.points.flatMap((p) => (p.min != null ? [p.min, p.max] : [p.v]));
     const ys = yScale(o.axis, values, o.band);
-    const x = (t) => pad.l + ((t - t0) / span) * pw;
     const y = (v) => pad.t + (1 - (v - ys.lo) / (ys.hi - ys.lo)) * ph;
 
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H, role: 'img', tabindex: 0,
@@ -161,13 +211,34 @@ export function lineChart(host, o) {
       const yy = Math.round(y(v)) + 0.5;
       svgEl('line', { x1: pad.l, x2: W - pad.r, y1: yy, y2: yy, class: 'viz-grid' }, svg);
       const t = svgEl('text', { x: pad.l - 8, y: yy, class: 'viz-axis', 'text-anchor': 'end', 'dominant-baseline': 'middle' }, svg);
-      t.textContent = v.toFixed(o.decimals && ys.tickStep < 1 ? 1 : 0);
+      t.textContent = tickText(v, ys.tickStep);
     }
-    // X labels
-    for (const tk of timeTicks(t0, t1, pw)) {
-      const t = svgEl('text', { x: x(tk.t), y: H - 8, class: 'viz-axis', 'text-anchor': 'middle' }, svg);
-      t.textContent = tk.label;
+    // X labels, per recording; a date row when recordings are split
+    const timeY = split ? H - 24 : H - 8;
+    let rightEdge = -Infinity, lastDate = null;
+    for (const s of sessions) {
+      let ticks = s.w >= 70 ? timeTicks(s.a, s.b, s.w) : [];
+      if (!ticks.length) ticks = [{ t: s.a, label: new Date(s.a).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) }];
+      for (const tk of ticks) {
+        if (x(tk.t) - 26 < rightEdge) continue;
+        const t = svgEl('text', { x: x(tk.t), y: timeY, class: 'viz-axis', 'text-anchor': 'middle' }, svg);
+        t.textContent = tk.label;
+        rightEdge = x(tk.t) + 26;
+      }
+      if (split) {
+        const date = new Date(s.a).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        if (date !== lastDate) {
+          const t = svgEl('text', { x: s.x + s.w / 2, y: H - 8, class: 'viz-axis viz-date', 'text-anchor': 'middle' }, svg);
+          t.textContent = date;
+          lastDate = date;
+        }
+      }
     }
+    // Dashed line where recordings were interrupted
+    sessions.slice(1).forEach((s) => {
+      const bx = s.x - BREAK_PX / 2;
+      svgEl('line', { x1: bx, x2: bx, y1: pad.t, y2: pad.t + ph, class: 'viz-break' }, svg);
+    });
 
     // Segments split at gaps (no line across time with no readings)
     const segments = [];
@@ -219,20 +290,20 @@ export function lineChart(host, o) {
       hdot.setAttribute('visibility', 'hidden');
       tip.hide();
     };
-    const nearest = (t) => {
+    const nearest = (sx) => {
       let lo = 0, hi = o.points.length - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (o.points[mid].t < t) lo = mid + 1;
+        if (x(o.points[mid].t) < sx) lo = mid + 1;
         else hi = mid;
       }
-      return lo > 0 && t - o.points[lo - 1].t < o.points[lo].t - t ? lo - 1 : lo;
+      return lo > 0 && sx - x(o.points[lo - 1].t) < x(o.points[lo].t) - sx ? lo - 1 : lo;
     };
     const hit = svgEl('rect', { x: pad.l, y: pad.t, width: pw, height: ph, fill: 'transparent' }, svg);
     hit.addEventListener('pointermove', (e) => {
       const r = svg.getBoundingClientRect();
       const sx = ((e.clientX - r.left) / r.width) * W;
-      showAt(nearest(t0 + ((sx - pad.l) / pw) * span));
+      showAt(nearest(sx));
     });
     hit.addEventListener('pointerleave', hide);
     svg.addEventListener('blur', hide);
@@ -283,7 +354,7 @@ export function dailyRange(host, o) {
       const yy = Math.round(y(v)) + 0.5;
       svgEl('line', { x1: pad.l, x2: W - pad.r, y1: yy, y2: yy, class: 'viz-grid' }, svg);
       const t = svgEl('text', { x: pad.l - 8, y: yy, class: 'viz-axis', 'text-anchor': 'end', 'dominant-baseline': 'middle' }, svg);
-      t.textContent = v.toFixed(o.decimals && ys.tickStep < 1 ? 1 : 0);
+      t.textContent = tickText(v, ys.tickStep);
     }
     const labelEvery = Math.ceil(o.days.length / Math.max(1, Math.floor(pw / 70)));
     const showValues = o.days.length <= 10 && slot >= 44;
